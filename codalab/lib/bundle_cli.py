@@ -123,6 +123,7 @@ BUNDLE_COMMANDS = (
     'mount',
     'netcat',
     'store',
+    'ancestors',
 )
 
 WORKSHEET_COMMANDS = ('new', 'add', 'wadd', 'work', 'print', 'wedit', 'wrm', 'wls')
@@ -2113,6 +2114,50 @@ class BundleCLI(object):
         else:
             for uuid in deleted_uuids:
                 print(uuid, file=self.stdout)
+
+    @Commands.command(
+        'ancestors',
+        help='Recursively print out all the ancestors.',
+        arguments=(
+            Commands.Argument(
+                'bundle_spec', help=BUNDLE_SPEC_FORMAT, nargs='*', completer=BundlesCompleter
+            ),
+            Commands.Argument(  # need the worksheet spec to get a client?
+                '-w',
+                '--worksheet-spec',
+                help='Operate on this worksheet (%s).' % WORKSHEET_SPEC_FORMAT,
+                completer=WorksheetsCompleter,
+            ),
+        ),
+    )
+    def do_ancestors_command(self, args):
+        args.bundle_spec = spec_util.expand_specs(args.bundle_spec)  # bundle might be ^1-3
+        client, worksheet_uuid = self.parse_client_worksheet_uuid(args.worksheet_spec)
+        bundle_uuids = self.target_specs_to_bundle_uuids(client, worksheet_uuid, args.bundle_spec)
+        
+        def print_ancestors(levels, bundle_info):
+            """
+            Get and print the ancestors recursively
+            param: levels: indicate how much space should this line have
+            param: deps: a list of dependencies
+            """
+            # print itself
+            filename = nested_dict_get(bundle_info, 'metadata', 'name')
+            uuid = bundle_info['uuid']
+            print(' ' * levels + '- {}({})'.format(filename, uuid[0:8]), file=self.stdout)
+
+            # recursively print parents. If does not have dependencies, stop
+            if bundle_info['dependencies']:
+                deps = bundle_info['dependencies']
+                for dep in deps:
+                    parent_uuid = dep['parent_uuid']
+                    parent_bundle = client.fetch('bundles', parent_uuid)
+                    print_ancestors(levels+1, parent_bundle)
+
+        for bundle_uuid in bundle_uuids:
+            bundle_info = client.fetch('bundles', bundle_uuid)
+            print_ancestors(0, bundle_info)
+        return
 
     @Commands.command(
         'search',
